@@ -2,8 +2,8 @@ package domain
 
 import "time"
 
-type CacheEntry[T any] struct {
-	Value      T         `json:"value"`
+type CacheEntry struct {
+	Value      []byte    `json:"value"`
 	CreatedAt  time.Time `json:"created_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
 	HitCount   int64     `json:"hit_count"`

@@ -23,13 +23,13 @@ func main() {
 		HitThreshold: 5,
 	}
 
-	repo := adapter.NewMemoryStore[any]()
+	repo := adapter.NewMemoryStore()
 	fetcher := &adapter.HTTPFetcher{
 		BaseURL: "https://jsonplaceholder.typicode.com",
 		Client:  &http.Client{Timeout: 10 * time.Second},
 	}
 
-	cacheSvc := service.NewCacheService[any](repo, fetcher, cfg)
+	cacheSvc := service.NewCacheService(repo, fetcher, cfg)
 	handler := api.NewProxyHandler(cacheSvc)
 
 	server := &http.Server{

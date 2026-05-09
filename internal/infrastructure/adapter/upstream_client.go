@@ -2,8 +2,8 @@ package adapter
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 )
 
@@ -12,7 +12,7 @@ type HTTPFetcher struct {
 	Client  *http.Client
 }
 
-func (fetcher *HTTPFetcher) Fetch(ctx context.Context, key string) (any, error) {
+func (fetcher *HTTPFetcher) Fetch(ctx context.Context, key string) ([]byte, error) {
 	url := fmt.Sprintf("%s/%s", fetcher.BaseURL, key)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 
@@ -26,10 +26,9 @@ func (fetcher *HTTPFetcher) Fetch(ctx context.Context, key string) (any, error) 
 		return nil, fmt.Errorf("upstream_status_%d", resp.StatusCode)
 	}
 
-	var target any
-	if err := json.NewDecoder(resp.Body).Decode(&target); err != nil {
-		return nil, err
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("upstream_status_%d", resp.StatusCode)
 	}
 
-	return target, nil
+	return io.ReadAll(resp.Body)
 }

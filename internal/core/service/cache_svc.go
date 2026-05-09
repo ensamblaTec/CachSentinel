@@ -10,16 +10,16 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-type CacheService[T any] struct {
-	repo    ports.CacheRepository[T]
-	fetcher ports.UpstreamFetcher[T]
+type CacheService struct {
+	repo    ports.CacheRepository
+	fetcher ports.UpstreamFetcher
 	cfg     domain.Config
 	sf      singleflight.Group
 	logger  *slog.Logger
 }
 
-func NewCacheService[T any](repo ports.CacheRepository[T], fetcher ports.UpstreamFetcher[T], cfg domain.Config) *CacheService[T] {
-	return &CacheService[T]{
+func NewCacheService(repo ports.CacheRepository, fetcher ports.UpstreamFetcher, cfg domain.Config) *CacheService {
+	return &CacheService{
 		repo:    repo,
 		fetcher: fetcher,
 		cfg:     cfg,
@@ -27,12 +27,14 @@ func NewCacheService[T any](repo ports.CacheRepository[T], fetcher ports.Upstrea
 	}
 }
 
-func (service *CacheService[T]) Execute(ctx context.Context, key string) (T, error) {
+func (service *CacheService) Execute(ctx context.Context, key string) ([]byte, error) {
 	entry, err := service.repo.Get(ctx, key)
 
 	if err == nil && entry != nil {
-		service.evaluatePrediction(key, entry)
-		return entry.Value, nil
+		if time.Now().Before(entry.ExpiresAt) {
+			service.evaluatePrediction(key, entry)
+			return entry.Value, nil
+		}
 	}
 
 	val, err, _ := service.sf.Do(key, func() (any, error) {
@@ -40,35 +42,44 @@ func (service *CacheService[T]) Execute(ctx context.Context, key string) (T, err
 	})
 
 	if err != nil {
-		return *new(T), err
+		return nil, err
 	}
 
-	return val.(T), nil
+	return val.([]byte), nil
 }
 
-func (service *CacheService[T]) evaluatePrediction(key string, entry *domain.CacheEntry[T]) {
+func (service *CacheService) evaluatePrediction(key string, entry *domain.CacheEntry) {
 	timeLeft := time.Until(entry.ExpiresAt)
 
 	if timeLeft < (service.cfg.DefaultTTL/5) && entry.HitCount > service.cfg.HitThreshold {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			service.logger.Info("predictive_refresh_triggered", "key", key)
-			service.refreshAndStore(ctx, key)
+
+			_, err, _ := service.sf.Do(key, func() (any, error) {
+				return service.refreshAndStore(ctx, key)
+			})
+
+			if err != nil {
+				service.logger.Error("predictive_refresh_error", "key", key, "err", err)
+			} else {
+				service.logger.Info("predictive_refresh_success", "key", key)
+			}
 		}()
 	}
 }
 
-func (service *CacheService[T]) refreshAndStore(ctx context.Context, key string) (T, error) {
+func (service *CacheService) refreshAndStore(ctx context.Context, key string) ([]byte, error) {
 	data, err := service.fetcher.Fetch(ctx, key)
 	if err != nil {
-		return *new(T), err
+		return nil, err
 	}
 
-	entry := &domain.CacheEntry[T]{
+	entry := &domain.CacheEntry{
 		Value:     data,
 		CreatedAt: time.Now(),
 		ExpiresAt: time.Now().Add(service.cfg.DefaultTTL),
+		HitCount:  1,
 	}
 
 	if err := service.repo.Set(ctx, key, entry); err != nil {
