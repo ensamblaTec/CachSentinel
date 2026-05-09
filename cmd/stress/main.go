@@ -11,42 +11,41 @@ import (
 func main() {
 	const (
 		concurrency = 50
-		totalHits   = 500
+		totalHits   = 100000
+		duration    = 15 * time.Second
 		targetURL   = "http://localhost:8080/posts/1"
 	)
 
 	var wg sync.WaitGroup
-	start := time.Now()
-
 	latencies := make(chan time.Duration, totalHits)
 
 	fmt.Printf("Iniciando ataque: %d peticiones con %d workers...\n", totalHits, concurrency)
 
-	semaphore := make(chan struct{}, concurrency)
+	start := time.Now()
+	deadline := time.After(duration)
+	ticker := time.NewTicker(concurrency * time.Millisecond)
+	defer ticker.Stop()
 
-	for index := range totalHits {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			reqStart := time.Now()
-			resp, err := http.Get(targetURL)
-			if err != nil {
-				fmt.Printf("error req %d: %v\n", id, err)
-				return
+	for {
+		select {
+		case <-deadline:
+			goto done
+		case <-ticker.C:
+			for range concurrency {
+				wg.Go(func() {
+					startReq := time.Now()
+					resp, err := http.Get(targetURL)
+					if err == nil {
+						io.Copy(io.Discard, resp.Body)
+						resp.Body.Close()
+					}
+					latencies <- time.Since(startReq)
+				})
 			}
-
-			_, _ = io.Copy(io.Discard, resp.Body)
-			defer resp.Body.Close()
-
-			latencies <- time.Since(reqStart)
-
-			time.Sleep(10 * time.Millisecond)
-		}(index)
+		}
 	}
 
+done:
 	wg.Wait()
 	close(latencies)
 

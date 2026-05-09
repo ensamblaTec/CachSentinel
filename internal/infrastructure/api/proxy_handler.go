@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -9,10 +8,10 @@ import (
 )
 
 type ProxyHandler struct {
-	cacheSvc *service.CacheService[any]
+	cacheSvc *service.CacheService
 }
 
-func NewProxyHandler(svc *service.CacheService[any]) *ProxyHandler {
+func NewProxyHandler(svc *service.CacheService) *ProxyHandler {
 	return &ProxyHandler{cacheSvc: svc}
 }
 
@@ -31,5 +30,6 @@ func (handler *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Cache-Sentinel", "HIT-OR-PREDICTIVE")
-	json.NewEncoder(w).Encode(data)
+
+	w.Write(data)
 }
