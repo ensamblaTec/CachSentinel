@@ -35,10 +35,27 @@ func (service *CacheService) Execute(ctx context.Context, key string) ([]byte, e
 			service.evaluatePrediction(key, entry)
 			return entry.Value, nil
 		}
+
+		service.logger.Info("cache_expired", "key", key)
+		if err := service.repo.Delete(ctx, key); err != nil {
+			service.logger.Error("cache_delete_error", "key", key, "err", err)
+		}
 	}
 
 	val, err, _ := service.sf.Do(key, func() (any, error) {
-		return service.refreshAndStore(ctx, key)
+		service.logger.Info("cache_miss", "key", key)
+		data, fetchErr := service.refreshAndStore(ctx, key)
+
+		if fetchErr != nil {
+			if entry != nil {
+				service.logger.Error("upstream_fetch_error_with_stale_cache", "key", key, "err", fetchErr)
+				entry.ExpiresAt = time.Now().Add(30 * time.Second)
+				_ = service.repo.Set(ctx, key, entry)
+				return entry.Value, nil
+			}
+			return nil, fetchErr
+		}
+		return data, nil
 	})
 
 	if err != nil {
